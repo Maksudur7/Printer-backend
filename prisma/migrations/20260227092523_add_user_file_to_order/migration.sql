@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "Order" ADD COLUMN     "filePath" TEXT,
+ADD COLUMN     "userId" TEXT,
+ALTER COLUMN "fileUrl" DROP NOT NULL,
+ALTER COLUMN "fileName" DROP NOT NULL,
+ALTER COLUMN "pageCount" DROP NOT NULL,
+ALTER COLUMN "totalAmount" DROP NOT NULL;

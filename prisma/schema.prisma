@@ -1,0 +1,173 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider        = "prisma-client-js"
+  // previewFeatures = ["driverAdapters"] - deprecated in Prisma 6+
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Kiosk {
+  id            String      @id @default(uuid())
+  deviceId      String      @unique // Hardware serial ba unique ID
+  name          String      // Kiosk-er ekta naam (e.g. "Library-01")
+  location      String?
+  status        KioskStatus @default(ONLINE)
+  qrCodeUrl     String?     // Backend theke generate kora QR link
+  paperLevel    Int         @default(100) // Percentage (0-100)
+  inkLevel      Int         @default(100) // Percentage (0-100)
+  lastError     String?     // Recording specific error messages
+  totalRevenue  Float       @default(0)   // Total earnings of this device
+  lastHeartbeat DateTime    @default(now())
+
+  orders    Order[]   // One-to-many relationship
+  printers  Printer[] // Printers connected to this kiosk
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+// Ekta kiosk-e koyta printer ache tar details
+// 1 PC-te multiple printer support korar jonno
+model Printer {
+  id          String @id @default(uuid())
+  kioskId     String
+  kiosk       Kiosk  @relation(fields: [kioskId], references: [id])
+
+  // Windows-e printer-er exact naam - agent software ei naam use korbe
+  // e.g. "HP LaserJet 1020", "Canon PIXMA MG3630"
+  windowsName String
+
+  // UI-te user dekhe shei naam
+  // e.g. "Black & White Printer", "Color Printer"
+  displayName String
+
+  // Windows driver info (debugging + compatibility)
+  driverName  String?   // e.g. "HP LaserJet 1020" driver
+  portName    String?   // e.g. "USB001", "IP_192.168.1.100"
+
+  supportsColor Boolean @default(false)
+  supportsBW    Boolean @default(true)
+  isActive      Boolean @default(true)
+  isNetwork     Boolean @default(false) // Network printer (IP/WSD) naki local (USB)?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([kioskId, windowsName])
+}
+
+enum KioskStatus {
+  ONLINE
+  OFFLINE
+  MAINTENANCE
+  OUT_OF_PAPER
+  OUT_OF_INK
+  SYSTEM_ERROR
+}
+
+model Order {
+  id          String @id @default(uuid())
+  orderNumber Int    @unique @default(autoincrement())
+
+  // associating entities
+  kioskId String
+  kiosk   Kiosk  @relation(fields: [kioskId], references: [deviceId])
+
+  // user who placed the order (optional)
+  userId    String?
+  userEmail String?
+  userPhone String?
+
+  // where the uploaded file is stored on backend/FS
+  filePath String?
+
+  // File details (possibly filled later)
+  fileUrl   String? // Cloud ba local storage link
+  fileName  String?
+  pageCount Int?
+  copyCount Int     @default(1)
+  isColor   Boolean @default(false)
+  isDuplex  Boolean @default(false)
+  orientation String @default("portrait") // portrait ba landscape
+
+  // Money details
+  totalAmount Float? // Mot koto taka bill holo
+  paidAmount  Float  @default(0) // Koto taka ekhon porjonto dise
+
+  // Statuses
+  paymentStatus PaymentStatus @default(PENDING)
+  printStatus   PrintStatus   @default(WAITING_FOR_PAYMENT)
+
+  payments Payment[] // Payment details tracking
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum PaymentStatus {
+  PENDING
+  PARTIAL    // Jodi keu kichu taka dey kintu purota na
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+enum PrintStatus {
+  WAITING_FOR_PAYMENT
+  QUEUED      // Taka deoa shesh, ekhon line-e ache
+  PRINTING    // Machine ekhon print korche
+  COMPLETED   // Hat-e peye gese
+  FAILED      // Kono karone print hoy nai
+}
+
+model Payment {
+  id      String @id @default(uuid())
+  orderId String
+  order   Order  @relation(fields: [orderId], references: [id])
+
+  amount        Float         // Ei specific transaction-e koto dise
+  method        PaymentMethod
+  transactionId String?       @unique // bKash/Nagad ID ba hardware signal ID
+
+  createdAt DateTime @default(now())
+}
+
+enum PaymentMethod {
+  CASH       // Bill Acceptor theke deoa taka
+  BKASH
+  NAGAD
+  SSLCOMMERZ
+  STRIPE
+}
+
+enum UserRole {
+  ADMIN
+  SUPER_ADMIN
+  USER
+}
+
+model User {
+  id         String   @id @default(uuid())
+  email      String   @unique
+  password   String
+  name       String?
+  role       UserRole @default(USER)
+  isApproved Boolean  @default(false) // Admin approval logic
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Config {
+  id             String   @id @default(uuid())
+  bwPrice        Float    @default(2.0)
+  colorPrice     Float    @default(5.0)
+  paperThreshold Int      @default(5)
+  updatedAt      DateTime @updatedAt
+}
