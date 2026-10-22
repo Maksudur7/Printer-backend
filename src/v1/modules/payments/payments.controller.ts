@@ -5,9 +5,17 @@ import { PaymentsService } from './payments.service';
 export class PaymentsController {
   constructor(private readonly paymentsService: PaymentsService) { }
 
+  @Post('initiate')
+  async initiatePayment(@Body() body: { orderId: string; method?: string }) {
+    if (!body?.orderId) {
+      throw new NotFoundException('Order ID is required');
+    }
+    return this.paymentsService.initPayment(body.orderId, body.method);
+  }
+
   @Post('init/:orderId')
-  async initPayment(@Param('orderId') orderId: string) {
-    return this.paymentsService.initPayment(orderId);
+  async initPayment(@Param('orderId') orderId: string, @Body() body?: { method?: string }) {
+    return this.paymentsService.initPayment(orderId, body?.method);
   }
 
   @Get('success')

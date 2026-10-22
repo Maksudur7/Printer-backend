@@ -14,7 +14,14 @@ import { PrismaService } from '../../shared/prisma/prisma.service';
 @Injectable()
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: (
+      process.env.ALLOWED_ORIGINS ||
+      `${process.env.FRONTEND_URL || 'https://printer-client.vercel.app'},http://localhost:3000,http://127.0.0.1:3000`
+    )
+      .split(',')
+      .map((o) => o.trim())
+      .filter(Boolean),
+    credentials: true,
   },
   namespace: '/kiosk',
 })
@@ -131,7 +138,7 @@ export class PrintGateway implements OnGatewayConnection, OnGatewayDisconnect {
   async handlePrintStatus(
     @MessageBody()
     data: { orderId: string; status: string; deviceId: string },
-    @ConnectedSocket() client: Socket,
+    @ConnectedSocket() _client: Socket,
   ) {
     this.logger.log(
       `Print status update - Order: ${data.orderId} | Status: ${data.status}`,

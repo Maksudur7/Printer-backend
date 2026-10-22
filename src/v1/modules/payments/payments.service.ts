@@ -18,7 +18,7 @@ export class PaymentsService {
     });
   }
 
-  async initPayment(orderId: string) {
+  async initPayment(orderId: string, method?: string) {
     const order = await this.prisma.order.findUnique({ where: { id: orderId } });
     if (!order) {
       throw new NotFoundException('Order not found');
@@ -26,6 +26,28 @@ export class PaymentsService {
 
     if (order.paymentStatus === 'COMPLETED') {
       throw new BadRequestException('Order is already paid');
+    }
+
+    const selectedMethod = (method || 'STRIPE').toUpperCase();
+
+    // If Stripe key is missing or not card payment, allow simulation / gateway redirect fallback
+    if (!process.env.STRIPE_SECRET_KEY || selectedMethod !== 'STRIPE') {
+      // Record payment attempt in DB
+      await this.prisma.payment.create({
+        data: {
+          orderId: order.id,
+          amount: order.totalAmount || 0,
+          method: (selectedMethod in ['CASH', 'BKASH', 'NAGAD', 'SSLCOMMERZ', 'STRIPE'] ? selectedMethod : 'STRIPE') as any,
+          transactionId: `TXN-${Date.now()}-${order.id.slice(0, 8)}`,
+        },
+      });
+
+      return {
+        message: 'Payment initiated successfully',
+        paymentUrl: null,
+        url: null,
+        success: true,
+      };
     }
 
     // Stripe checkout session তৈরি করা
@@ -65,6 +87,9 @@ export class PaymentsService {
 
       return {
         url: session.url,
+        paymentUrl: session.url,
+        message: 'Payment session created',
+        success: true,
       };
     } catch (error) {
       throw new BadRequestException(`Stripe Error: ${error.message}`);

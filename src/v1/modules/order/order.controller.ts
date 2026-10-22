@@ -2,13 +2,15 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { OrderService } from './order.service';
 import { diskStorage } from 'multer';
 import { extname } from 'path';
-import { Controller, Delete, Get, Param, Patch, Post, UploadedFile, UseInterceptors, Body, Res } from '@nestjs/common';
+import { Controller, Delete, Get, Logger, Param, Patch, Post, UploadedFile, UseInterceptors, Body, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import * as path from 'path';
 import * as fs from 'fs';
+import { UpdateOrderDto } from './dto/update-order.dto';
 
 @Controller('v1/order')
 export class OrderController {
+  private readonly logger = new Logger(OrderController.name);
   constructor(private readonly orderService: OrderService) {}
 
   @Get('download/:filename')
@@ -18,21 +20,21 @@ export class OrderController {
       const filePath = path.join(process.cwd(), folder, filename);
 
       if (!fs.existsSync(filePath)) {
-        this.orderService['logger'].error(`File not found: ${filePath}`);
+        this.logger.error(`File not found: ${filePath}`);
         return res.status(404).json({ message: 'File not found' });
       }
 
       // res.download ব্যবহার করা বেশি নিরাপদ
       return res.download(filePath, filename, (err) => {
         if (err) {
-          console.error('Download error:', err);
+          this.logger.error(`Download stream error: ${err.message}`);
           if (!res.headersSent) {
             res.status(500).send({ message: 'Error downloading file' });
           }
         }
       });
     } catch (error) {
-      console.error('Controller Error:', error);
+      this.logger.error(`Controller error in downloadFile: ${error}`);
       return res.status(500).json({ message: 'Internal server error' });
     }
   }
@@ -68,8 +70,7 @@ export class OrderController {
   }
 
   @Patch(':id')
-  async update(@Param('id') id: string, @Body() updateOrderDto: any) {
-    console.log(id);
+  async update(@Param('id') id: string, @Body() updateOrderDto: UpdateOrderDto) {
     return await this.orderService.update(id, updateOrderDto);
   }
 

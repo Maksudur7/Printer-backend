@@ -1,9 +1,33 @@
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException, Logger } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { PrismaService } from '../../shared/prisma/prisma.service';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { PrintGateway } from '../print-gateway/print.gateway';
 import { PDFDocument } from 'pdf-lib';
 import * as fs from 'fs';
+import { Order, PaymentStatus, PrintStatus, Printer } from '@prisma/client';
+import 'multer';
+
+export interface CreateOrderInput {
+  kioskId: string;
+  userId?: string;
+  userEmail?: string;
+  userPhone?: string;
+  pageCount?: string | number;
+  copyCount?: string | number;
+  isColor?: string | boolean;
+  isDuplex?: string | boolean;
+  orientation?: string;
+  paymentMethod?: string;
+  isCash?: string | boolean;
+  paymentType?: string;
+  [key: string]: any;
+}
 
 @Injectable()
 export class OrderService {
@@ -12,16 +36,37 @@ export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly printGateway: PrintGateway,
-  ) { }
+  ) {}
 
-  async createOrder(data: any, file: Express.Multer.File) {
+  /**
+   * Helper to select the appropriate printer (Color vs BW)
+   */
+  private selectPrinter(
+    printers: Printer[] | undefined,
+    isColor: boolean,
+  ): Printer | null {
+    if (!printers || printers.length === 0) {
+      return null;
+    }
+    if (isColor) {
+      return printers.find((p) => p.supportsColor) || printers[0];
+    }
+    return printers.find((p) => p.supportsBW) || printers[0];
+  }
+
+  async createOrder(
+    data: CreateOrderInput,
+    file?: Express.Multer.File,
+  ): Promise<Order> {
     if (!file) {
-      throw new BadRequestException('No file uploaded. Please select a file with key "file"');
+      throw new BadRequestException(
+        'No file uploaded. Please select a file with key "file"',
+      );
     }
 
     // ১. কিওস্ক আছে কি না চেক করো (Foreign Key Error এড়াতে)
     const rawKioskId = (data.kioskId || '').toString().trim();
-    console.log(`[ORDER] Creating order for Kiosk: "${rawKioskId}"`);
+    this.logger.log(`[ORDER] Creating order for Kiosk: "${rawKioskId}"`);
 
     const kiosk = await this.prisma.kiosk.findUnique({
       where: { deviceId: rawKioskId },
@@ -29,38 +74,80 @@ export class OrderService {
 
     if (!kiosk) {
       this.logger.error(`Kiosk not found in DB: "${rawKioskId}"`);
-      throw new BadRequestException(`Invalid Kiosk ID: "${rawKioskId}". Please ensure the Kiosk is registered.`);
+      throw new BadRequestException(
+        `Invalid Kiosk ID: "${rawKioskId}". Please ensure the Kiosk is registered.`,
+      );
     }
 
-    let pageCount = parseInt(data.pageCount) || 1;
+    let pageCount =
+      typeof data.pageCount === 'number'
+        ? data.pageCount
+        : parseInt(String(data.pageCount || '1'), 10) || 1;
 
     // ২. PDF পেজ কাউন্ট (Vercel-এ ফাইল পাথ হ্যান্ডেল করা)
     if (file.mimetype === 'application/pdf') {
       try {
-        const dataBuffer = fs.readFileSync(file.path);
-        const pdfDoc = await PDFDocument.load(dataBuffer);
-        pageCount = pdfDoc.getPageCount();
+        let dataBuffer: Buffer | null = null;
+        if (file.path && fs.existsSync(file.path)) {
+          dataBuffer = fs.readFileSync(file.path);
+        } else if (file.buffer) {
+          dataBuffer = file.buffer;
+        }
+
+        if (dataBuffer) {
+          const pdfDoc = await PDFDocument.load(dataBuffer);
+          pageCount = pdfDoc.getPageCount();
+        }
       } catch (error) {
-        console.error('Error parsing PDF:', error);
+        this.logger.error(
+          `Error parsing PDF: ${error instanceof Error ? error.message : String(error)}`,
+        );
       }
     }
 
-    const isColor = String(data.isColor).toLowerCase() === 'true';
-    const copyCount = parseInt(data.copyCount) || 1;
+    const isColor =
+      typeof data.isColor === 'boolean'
+        ? data.isColor
+        : String(data.isColor).toLowerCase() === 'true';
 
-    const rate = isColor
-      ? Number(process.env.PRICE_COLOR) || 5
-      : Number(process.env.PRICE_BW) || 2;
+    const copyCount =
+      typeof data.copyCount === 'number'
+        ? data.copyCount
+        : parseInt(String(data.copyCount || '1'), 10) || 1;
+
+    const isDuplex =
+      typeof data.isDuplex === 'boolean'
+        ? data.isDuplex
+        : String(data.isDuplex).toLowerCase() === 'true';
+
+    let rate: number;
+    try {
+      const config = await this.prisma.config.findFirst();
+      if (config) {
+        rate = isColor ? config.colorPrice : config.bwPrice;
+      } else {
+        rate = isColor
+          ? Number(process.env.PRICE_COLOR) || 5
+          : Number(process.env.PRICE_BW) || 2;
+      }
+    } catch {
+      rate = isColor
+        ? Number(process.env.PRICE_COLOR) || 5
+        : Number(process.env.PRICE_BW) || 2;
+    }
     const totalAmount = pageCount * rate * copyCount;
 
     // ─── ফাইল ইউআরএল জেনারেট করা
-    const appUrl = process.env.BACKEND_URL || 'https://printer-project-production.up.railway.app';
-    const fileUrl = `${appUrl.replace(/\/$/, '')}/uploads/${file.filename}`;
+    const appUrl =
+      process.env.BACKEND_URL ||
+      'https://printer-project-production.up.railway.app';
+    const fileNameOnDisk = file.filename || file.originalname;
+    const fileUrl = `${appUrl.replace(/\/$/, '')}/uploads/${fileNameOnDisk}`;
 
-    const isCashPayment = 
-      String(data.paymentMethod).toUpperCase() === 'CASH' || 
-      String(data.isCash).toLowerCase() === 'true' ||
-      String(data.paymentType).toUpperCase() === 'CASH';
+    const isCashPayment =
+      String(data.paymentMethod || '').toUpperCase() === 'CASH' ||
+      String(data.isCash || '').toLowerCase() === 'true' ||
+      String(data.paymentType || '').toUpperCase() === 'CASH';
 
     // ১. কিওস্কের printers লোড করে নেওয়া
     const kioskWithPrinters = await this.prisma.kiosk.findUnique({
@@ -74,40 +161,38 @@ export class OrderService {
 
     const order = await this.prisma.order.create({
       data: {
-        userId: data.userId,
-        userEmail: data.userEmail,
-        userPhone: data.userPhone,
+        userId: data.userId || null,
+        userEmail: data.userEmail || null,
+        userPhone: data.userPhone || null,
         kioskId: kiosk.deviceId, // Use validated deviceId
-        filePath: file.path,
+        filePath: file.path || null,
         fileName: file.originalname,
         fileUrl: fileUrl,
         pageCount: pageCount,
         copyCount: copyCount,
         isColor: isColor,
-        isDuplex: String(data.isDuplex).toLowerCase() === 'true',
+        isDuplex: isDuplex,
         orientation: data.orientation || 'portrait',
         totalAmount: totalAmount,
-        paymentStatus: isCashPayment ? 'COMPLETED' : 'PENDING',
-        printStatus: isCashPayment ? 'QUEUED' : 'WAITING_FOR_PAYMENT',
+        paymentStatus: isCashPayment
+          ? PaymentStatus.COMPLETED
+          : PaymentStatus.PENDING,
+        printStatus: isCashPayment
+          ? PrintStatus.QUEUED
+          : PrintStatus.WAITING_FOR_PAYMENT,
       },
     });
 
     // ২. যদি Cash পেমেন্ট হয়, তবে কোনো এপ্রুভাল ছাড়াই সাথে সাথে প্রিন্ট জব কিওস্কে পাঠিয়ে দাও!
     if (isCashPayment) {
-      console.log(`[CASH_BYPASS] Instant Printing for Order #${order.orderNumber} (Cash selected, no approval needed)`);
+      this.logger.log(
+        `[CASH_BYPASS] Instant Printing for Order #${order.orderNumber} (Cash selected, no approval needed)`,
+      );
 
-      let selectedPrinter: any = null;
-      if (kioskWithPrinters?.printers && kioskWithPrinters.printers.length > 0) {
-        if (order.isColor) {
-          selectedPrinter =
-            kioskWithPrinters.printers.find((p: any) => p.supportsColor) ||
-            kioskWithPrinters.printers[0];
-        } else {
-          selectedPrinter =
-            kioskWithPrinters.printers.find((p: any) => p.supportsBW) ||
-            kioskWithPrinters.printers[0];
-        }
-      }
+      const selectedPrinter = this.selectPrinter(
+        kioskWithPrinters?.printers,
+        order.isColor,
+      );
 
       const jobSent = this.printGateway.sendPrintJob(order.kioskId, {
         orderId: order.id,
@@ -123,34 +208,41 @@ export class OrderService {
       });
 
       if (!jobSent) {
-        console.warn(`[CASH_BYPASS] Kiosk ${order.kioskId} is OFFLINE. Order #${order.orderNumber} queued in DB.`);
+        this.logger.warn(
+          `[CASH_BYPASS] Kiosk ${order.kioskId} is OFFLINE. Order #${order.orderNumber} queued in DB.`,
+        );
       }
     }
 
     return order;
   }
 
-  async getPendingOrders(kioskId: string) {
+  async getPendingOrders(kioskId: string): Promise<Order[]> {
+    // Return both QUEUED (payment done, not yet printed) and
+    // WAITING_FOR_PAYMENT with COMPLETED payment (edge case on restart)
     return await this.prisma.order.findMany({
       where: {
         kioskId,
-        printStatus: 'WAITING_FOR_PAYMENT',
+        paymentStatus: PaymentStatus.COMPLETED,
+        printStatus: {
+          in: [PrintStatus.QUEUED, PrintStatus.WAITING_FOR_PAYMENT],
+        },
       },
       orderBy: { createdAt: 'asc' },
     });
   }
 
-  async findAll() {
+  async findAll(): Promise<Order[]> {
     return this.prisma.order.findMany({ orderBy: { createdAt: 'desc' } });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string): Promise<Order> {
     const order = await this.prisma.order.findUnique({ where: { id } });
     if (!order) throw new NotFoundException(`Order with ID ${id} not found`);
     return order;
   }
 
-  async update(id: string, updateOrderDto: UpdateOrderDto) {
+  async update(id: string, updateOrderDto: UpdateOrderDto): Promise<Order> {
     const order = await this.prisma.order.findUnique({ where: { id } });
 
     if (!order) {
@@ -158,19 +250,18 @@ export class OrderService {
     }
 
     if (
-      updateOrderDto.paymentStatus === 'COMPLETED' &&
-      order.paymentStatus !== 'COMPLETED'
+      updateOrderDto.paymentStatus === PaymentStatus.COMPLETED &&
+      order.paymentStatus !== PaymentStatus.COMPLETED
     ) {
-
       const updatedOrder = await this.prisma.order.update({
         where: { id },
         data: {
           ...updateOrderDto,
-          printStatus: 'QUEUED',
+          printStatus: PrintStatus.QUEUED,
         },
       });
 
-      const kiosk: any = await this.prisma.kiosk.findUnique({
+      const kiosk = await this.prisma.kiosk.findUnique({
         where: { deviceId: order.kioskId },
         include: {
           printers: {
@@ -179,18 +270,10 @@ export class OrderService {
         },
       });
 
-      let selectedPrinter: any = null;
-      if (kiosk?.printers && kiosk.printers.length > 0) {
-        if (order.isColor) {
-          selectedPrinter =
-            kiosk.printers.find((p: any) => p.supportsColor) ||
-            kiosk.printers[0];
-        } else {
-          selectedPrinter =
-            kiosk.printers.find((p: any) => p.supportsBW) ||
-            kiosk.printers[0];
-        }
-      }
+      const selectedPrinter = this.selectPrinter(
+        kiosk?.printers,
+        order.isColor,
+      );
 
       const jobSent = this.printGateway.sendPrintJob(order.kioskId, {
         orderId: updatedOrder.id,
@@ -206,7 +289,7 @@ export class OrderService {
       });
 
       if (!jobSent) {
-        console.warn(
+        this.logger.warn(
           `Kiosk ${order.kioskId} is OFFLINE. Order ${id} queued in DB.`,
         );
       }
@@ -215,7 +298,10 @@ export class OrderService {
     }
 
     // Normal update (payment complete na hole)
-    if (order.paymentStatus !== 'COMPLETED' && !updateOrderDto.paymentStatus) {
+    if (
+      order.paymentStatus !== PaymentStatus.COMPLETED &&
+      !updateOrderDto.paymentStatus
+    ) {
       throw new ForbiddenException(
         'Please complete your payment before updating order status',
       );
@@ -227,7 +313,7 @@ export class OrderService {
     });
   }
 
-  async remove(id: string) {
+  async remove(id: string): Promise<Order> {
     await this.findOne(id);
     return this.prisma.order.delete({ where: { id } });
   }
