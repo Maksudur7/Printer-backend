@@ -140,7 +140,8 @@ export class OrderService {
     // ─── ফাইল ইউআরএল জেনারেট করা
     const appUrl =
       process.env.BACKEND_URL ||
-      'https://printer-project-production.up.railway.app';
+      process.env.APP_URL ||
+      'http://localhost:5000';
     const fileNameOnDisk = file.filename || file.originalname;
     const fileUrl = `${appUrl.replace(/\/$/, '')}/uploads/${fileNameOnDisk}`;
 

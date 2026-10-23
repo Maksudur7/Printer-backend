@@ -6,16 +6,18 @@ import { PrintGateway } from '../print-gateway/print.gateway';
 @Injectable()
 export class PaymentsService {
   private stripe: any;
-  private readonly appUrl = process.env.APP_URL || 'https://printer-project-production.up.railway.app';
-  private readonly frontendUrl = process.env.FRONTEND_URL || 'https://printer-client.vercel.app';
+  private readonly appUrl = process.env.APP_URL || 'http://localhost:5000';
+  private readonly frontendUrl = process.env.FRONTEND_URL || 'http://localhost:3000';
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly printGateway: PrintGateway,
   ) {
-    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY || '', {
-      apiVersion: '2025-01-27' as any,
-    });
+    if (process.env.STRIPE_SECRET_KEY) {
+      this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
+        apiVersion: '2025-01-27' as any,
+      });
+    }
   }
 
   async initPayment(orderId: string, method?: string) {
