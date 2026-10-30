@@ -55,6 +55,14 @@ export class KioskController {
     return this.kioskService.updateHeartbeat(deviceId);
   }
 
+  @Patch(':deviceId/network')
+  updateNetwork(
+    @Param('deviceId') deviceId: string,
+    @Body() networkDto: any
+  ) {
+    return this.kioskService.updateNetwork(deviceId, networkDto);
+  }
+
   @Patch(':deviceId/status')
   updateStatus(
     @Param('deviceId') deviceId: string,

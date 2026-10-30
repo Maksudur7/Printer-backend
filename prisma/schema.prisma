@@ -26,6 +26,13 @@ model Kiosk {
   lastError     String?     // Recording specific error messages
   totalRevenue  Float       @default(0)   // Total earnings of this device
   lastHeartbeat DateTime    @default(now())
+  // ── Network System Fields ──────────────────
+  connectionType String?    @default("WIFI") // "WIFI" or "ETHERNET"
+  wifiSsid       String?    // Wi-Fi Name (SSID)
+  wifiPassword   String?    // Wi-Fi Password
+  wifiSecurity   String?    @default("WPA")  // "WPA", "WEP", "NONE"
+  localIp        String?    // Kiosk local IP e.g. 192.168.0.13
+  localPort      Int?       @default(8765)
 
   orders    Order[]   // One-to-many relationship
   printers  Printer[] // Printers connected to this kiosk

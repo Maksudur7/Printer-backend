@@ -47,6 +47,22 @@ export class KioskService {
     });
   }
 
+  // Network configuration update (Wi-Fi, IP, Port)
+  async updateNetwork(deviceId: string, networkDto: any) {
+    const { connectionType, wifiSsid, wifiPassword, wifiSecurity, localIp, localPort } = networkDto;
+    return this.prisma.kiosk.update({
+      where: { deviceId },
+      data: {
+        connectionType: connectionType || 'WIFI',
+        wifiSsid,
+        wifiPassword,
+        wifiSecurity: wifiSecurity || 'WPA',
+        localIp,
+        localPort: localPort ? Number(localPort) : 8765,
+      },
+    });
+  }
+
   // ৩. Paper ba Ink level update (Hardware/System theke ashbe)
   async updateStatus(deviceId: string, updateDto: UpdateKioskStatusDto) {
     let finalStatus: KioskStatus = updateDto.status as KioskStatus || 'ONLINE';
