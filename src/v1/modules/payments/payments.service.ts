@@ -153,6 +153,7 @@ export class PaymentsService {
           isDuplex: updatedOrder.isDuplex,
           orientation: updatedOrder.orientation,
           targetPrinter: selectedPrinter?.windowsName || null,
+          totalAmount: updatedOrder.totalAmount,
         });
 
         if (!jobSent) {
