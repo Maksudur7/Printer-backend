@@ -135,6 +135,10 @@ export class OrderService {
         ? Number(process.env.PRICE_COLOR) || 5
         : Number(process.env.PRICE_BW) || 2;
     }
+    // Safety guard: if rate is 0 or invalid, fallback to standard pricing
+    if (!rate || rate <= 0) {
+      rate = isColor ? 5 : 2;
+    }
     const totalAmount = pageCount * rate * copyCount;
 
     // ─── ফাইল ইউআরএল জেনারেট করা
@@ -206,6 +210,7 @@ export class OrderService {
         isDuplex: order.isDuplex,
         orientation: order.orientation,
         targetPrinter: selectedPrinter?.windowsName || null,
+        totalAmount: order.totalAmount,
       });
 
       if (!jobSent) {
